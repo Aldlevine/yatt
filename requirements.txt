@@ -1,0 +1,9 @@
+IPython
+ipywidgets==7.7.3
+pyyaml
+tensorboard
+torch
+torchvision
+tqdm
+pyyaml
+git+https://github.com/Aldlevine/fyst.git

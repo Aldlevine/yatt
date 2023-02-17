@@ -1,0 +1,6 @@
+{
+    "python.linting.enabled": false,
+    "python.analysis.typeCheckingMode": "basic",
+    "python.formatting.provider": "yapf",
+    "notebook.output.textLineLimit": 60
+}
