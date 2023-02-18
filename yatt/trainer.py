@@ -429,7 +429,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         return epoch_loss.item()
 
     def _train_loop(self) -> float:
-
+        self.model.train()
         def get_loss(batch: list[_Tensor], batch_idx: int) -> _Tensor:
             self.model.zero_grad()
             loss = self.train_step(batch, batch_idx)
@@ -441,8 +441,10 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
 
     @_torch.no_grad()
     def _val_loop(self, ) -> float:
+        self.model.eval()
         return self._loop("val", self.val_step)
 
     @_torch.no_grad()
     def _test_loop(self, ) -> float:
+        self.model.eval()
         return self._loop("test", self.test_step)

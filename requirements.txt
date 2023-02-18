@@ -5,5 +5,4 @@ tensorboard
 torch
 torchvision
 tqdm
-pyyaml
 git+https://github.com/Aldlevine/fyst.git
