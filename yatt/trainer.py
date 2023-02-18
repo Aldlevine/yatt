@@ -124,7 +124,15 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         raise NotImplementedError(self.test_step.__name__)
 
     @_abc.abstractmethod
+    def train_epoch_begin(self) -> None:
+        pass
+
+    @_abc.abstractmethod
     def train_epoch_end(self) -> None:
+        pass
+
+    @_abc.abstractmethod
+    def val_epoch_begin(self) -> None:
         pass
 
     @_abc.abstractmethod
@@ -187,13 +195,9 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
             self.epoch = epoch
             if self.data_loaders.train != None:
                 self._train_loop()
-                self.train_epoch_end()
             if self.data_loaders.val != None:
                 loss = self._val_loop()
-                self._save_best_ckpt(loss)
-                self._save_latest_ckpt(loss)
-                self._display_model_stats()
-                self.val_epoch_end()
+            self._display_model_stats()
         if self.data_loaders.test != None:
             self._test_loop()
 
@@ -428,7 +432,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
 
         return epoch_loss.item()
 
-    def _train_loop(self) -> float:
+    def _train_loop(self) -> None:
         self.model.train()
         def get_loss(batch: list[_Tensor], batch_idx: int) -> _Tensor:
             self.model.zero_grad()
@@ -437,14 +441,20 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
             self.optimizer.step()
             return loss
 
-        return self._loop("train", get_loss, log_epoch_only=False)
+        self.train_epoch_begin()
+        self._loop("train", get_loss, log_epoch_only=False)
+        self.train_epoch_end()
 
     @_torch.no_grad()
-    def _val_loop(self, ) -> float:
+    def _val_loop(self, ) -> None:
         self.model.eval()
-        return self._loop("val", self.val_step)
+        self.val_epoch_begin()
+        loss = self._loop("val", self.val_step)
+        self.val_epoch_end()
+        self._save_best_ckpt(loss)
+        self._save_latest_ckpt(loss)
 
     @_torch.no_grad()
-    def _test_loop(self, ) -> float:
+    def _test_loop(self, ) -> None:
         self.model.eval()
-        return self._loop("test", self.test_step)
+        self._loop("test", self.test_step)
