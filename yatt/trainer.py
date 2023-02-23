@@ -33,6 +33,11 @@ class DataLoaderConfig:
     test: _data.DataLoader[_Any] | None = None
 
 
+class OptimizerConfig(_NamedTuple):
+    optimizer: _torch.optim.Optimizer
+    lr_scheduler: _torch.optim.lr_scheduler._LRScheduler
+
+
 HParams = _NamedTuple
 _HParamType = _TypeVar("_HParamType", bound=HParams)
 
@@ -103,8 +108,11 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
     def configure_model(self) -> _nn.Module:
         raise NotImplementedError(self.configure_model.__name__)
 
+    # @_abc.abstractmethod
+    # def configure_optimizer(self) -> _torch.optim.Optimizer:
+    #     raise NotImplementedError(self.configure_optimizer.__name__)
     @_abc.abstractmethod
-    def configure_optimizer(self) -> _torch.optim.Optimizer:
+    def configure_optimizer(self) -> OptimizerConfig:
         raise NotImplementedError(self.configure_optimizer.__name__)
 
     @_abc.abstractmethod
@@ -139,22 +147,22 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
     def val_epoch_end(self) -> None:
         pass
 
-    def configure(
-        self,
-        hparams: _HParamType,
-        start_epoch: int = 0,
-        model_state: dict[_Any, _Any] | None = None,
-        optim_state: dict[_Any, _Any] | None = None,
-    ) -> None:
+    def configure(self,
+                  hparams: _HParamType,
+                  start_epoch: int = 0,
+                  model_state: dict[_Any, _Any] | None = None,
+                  optim_state: dict[_Any, _Any] | None = None,
+                  lr_sched_state: dict[_Any, _Any] | None = None) -> None:
         self.hparams = hparams
         self.epoch = start_epoch
         self.model = self.configure_model().to(self.device)
         if model_state:
             self.model.load_state_dict(model_state)
-        self.optimizer = self.configure_optimizer()
+        self.optimizer, self.lr_scheduler = self.configure_optimizer()
         if optim_state:
             self.optimizer.load_state_dict(optim_state)  # type: ignore
-        # hparams_log = { k:v for k,v in self.hparams._asdict() }
+        if lr_sched_state != None and self.lr_scheduler != None:
+            self.lr_scheduler.load_state_dict(lr_sched_state)
         hparams_log = {}
         for k, v in self.hparams._asdict().items():
             if not isinstance(v, (float, str, bool, _Tensor)):
@@ -434,6 +442,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
 
     def _train_loop(self) -> None:
         self.model.train()
+
         def get_loss(batch: list[_Tensor], batch_idx: int) -> _Tensor:
             self.model.zero_grad()
             loss = self.train_step(batch, batch_idx)
@@ -443,6 +452,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
 
         self.train_epoch_begin()
         self._loop("train", get_loss, log_epoch_only=False)
+        if self.lr_scheduler != None:
+            self.lr_scheduler.step()
         self.train_epoch_end()
 
     @_torch.no_grad()
