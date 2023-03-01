@@ -453,7 +453,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         self.train_epoch_begin()
         self._loop("train", get_loss, log_epoch_only=False)
         if self.lr_scheduler != None:
-            self.lr_scheduler.step()
+            self.lr_scheduler.step(self.epoch + 1)
         self.train_epoch_end()
 
     @_torch.no_grad()
