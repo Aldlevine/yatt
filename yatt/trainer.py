@@ -54,6 +54,7 @@ class _CheckpointSaveData(_Generic[_HParamType]):
     # training states
     model_state: dict[_Any, _Any]
     optim_state: dict[_Any, _Any]
+    sched_state: dict[_Any, _Any]
 
 
 @_dataclass
@@ -152,7 +153,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
                   start_epoch: int = 0,
                   model_state: dict[_Any, _Any] | None = None,
                   optim_state: dict[_Any, _Any] | None = None,
-                  lr_sched_state: dict[_Any, _Any] | None = None) -> None:
+                  sched_state: dict[_Any, _Any] | None = None) -> None:
         self.hparams = hparams
         self.epoch = start_epoch
         self.model = self.configure_model().to(self.device)
@@ -161,8 +162,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         self.optimizer, self.lr_scheduler = self.configure_optimizer()
         if optim_state:
             self.optimizer.load_state_dict(optim_state)  # type: ignore
-        if lr_sched_state != None and self.lr_scheduler != None:
-            self.lr_scheduler.load_state_dict(lr_sched_state)
+        if sched_state != None and self.lr_scheduler != None:
+            self.lr_scheduler.load_state_dict(sched_state)
         hparams_log = {}
         for k, v in self.hparams._asdict().items():
             if not isinstance(v, (float, str, bool, _Tensor)):
@@ -185,6 +186,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
             save_data.epoch + 1,
             save_data.model_state,
             save_data.optim_state,
+            save_data.sched_state,
         )
         del save_data
 
@@ -338,6 +340,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         save_data = _CheckpointSaveData[_HParamType](
             model_state=self.model.state_dict(),
             optim_state=self.optimizer.state_dict(),
+            sched_state=self.lr_scheduler.state_dict(),
             hparams=self.hparams,
             epoch=self.epoch,
             loss=loss,
@@ -453,7 +456,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         self.train_epoch_begin()
         self._loop("train", get_loss, log_epoch_only=False)
         if self.lr_scheduler != None:
-            self.lr_scheduler.step(self.epoch + 1)
+            self.lr_scheduler.step()
         self.train_epoch_end()
 
     @_torch.no_grad()
