@@ -2,7 +2,7 @@ import abc as _abc
 import os as _os
 import time as _time
 from dataclasses import dataclass as _dataclass
-from typing import Any as _Any
+from typing import Any as _Any, Optional as _Optional
 from typing import Callable as _Callable
 from typing import Generic as _Generic
 from typing import NamedTuple as _NamedTuple
@@ -33,9 +33,11 @@ class DataLoaderConfig:
     test: _data.DataLoader[_Any] | None = None
 
 
+_lr_scheduler = _torch.optim.lr_scheduler._LRScheduler | _torch.optim.lr_scheduler.ReduceLROnPlateau
+
 class OptimizerConfig(_NamedTuple):
     optimizer: _torch.optim.Optimizer
-    lr_scheduler: _torch.optim.lr_scheduler._LRScheduler
+    lr_scheduler: _Optional[_lr_scheduler]
 
 
 HParams = _NamedTuple
@@ -54,7 +56,7 @@ class _CheckpointSaveData(_Generic[_HParamType]):
     # training states
     model_state: dict[_Any, _Any]
     optim_state: dict[_Any, _Any]
-    sched_state: dict[_Any, _Any]
+    sched_state: _Optional[dict[_Any, _Any]]
 
 
 @_dataclass
@@ -340,7 +342,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         save_data = _CheckpointSaveData[_HParamType](
             model_state=self.model.state_dict(),
             optim_state=self.optimizer.state_dict(),
-            sched_state=self.lr_scheduler.state_dict(),
+            sched_state=self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None,
             hparams=self.hparams,
             epoch=self.epoch,
             loss=loss,
@@ -455,8 +457,6 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
 
         self.train_epoch_begin()
         self._loop("train", get_loss, log_epoch_only=False)
-        if self.lr_scheduler != None:
-            self.lr_scheduler.step()
         self.train_epoch_end()
 
     @_torch.no_grad()
@@ -464,6 +464,11 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         self.model.eval()
         self.val_epoch_begin()
         loss = self._loop("val", self.val_step)
+        if self.lr_scheduler != None:
+            if isinstance(self.lr_scheduler, _torch.optim.lr_scheduler.ReduceLROnPlateau):
+                self.lr_scheduler.step(loss)
+            else:
+                self.lr_scheduler.step()
         self.val_epoch_end()
         self._save_best_ckpt(loss)
         self._save_latest_ckpt(loss)
