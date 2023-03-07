@@ -42,6 +42,7 @@ class OptimizerConfig(_NamedTuple):
 
 HParams = _NamedTuple
 _HParamType = _TypeVar("_HParamType", bound=HParams)
+_ModelType = _TypeVar("_ModelType", bound=_nn.Module)
 
 
 @_dataclass
@@ -82,7 +83,7 @@ def _sizeof_fmt(num, suffix="B"):
     return f"{num:.1f}Yi{suffix}"
 
 
-class Trainer(_abc.ABC, _Generic[_HParamType]):
+class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
 
     def __init__(
         self,
@@ -108,7 +109,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         self.reserved_lines = 0
 
     @_abc.abstractmethod
-    def configure_model(self) -> _nn.Module:
+    def configure_model(self) -> _ModelType:
         raise NotImplementedError(self.configure_model.__name__)
 
     # @_abc.abstractmethod
@@ -196,7 +197,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
         del save_data
 
     @classmethod
-    def load_checkpoint(cls, checkpoint_path: str) -> tuple[_nn.Module, _HParamType]:
+    def load_checkpoint(cls, checkpoint_path: str) -> tuple[_ModelType, _HParamType]:
         save_data: _CheckpointSaveData = _torch.load(checkpoint_path)
         trainer = cls("TMP")
         trainer.hparams = save_data.hparams
