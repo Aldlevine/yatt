@@ -103,8 +103,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
 
         self.logdir = _time.strftime(f"runs/{self.exp_name}/%Y-%m-%d@%T")
         self.ckptdir = _os.path.join(self.logdir, "checkpoints")
-        self.writer = _SummaryWriter(self.logdir)
-        self.pbar: _tqdm = _tqdm_auto(bar_format="", leave=False, position=0)
+        # self.writer = _SummaryWriter(self.logdir)
+        # self.pbar: _tqdm = _tqdm_auto(bar_format="", leave=False, position=0)
         self.reserved_lines = 0
 
     @_abc.abstractmethod
@@ -156,6 +156,9 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
                   model_state: dict[_Any, _Any] | None = None,
                   optim_state: dict[_Any, _Any] | None = None,
                   sched_state: dict[_Any, _Any] | None = None) -> None:
+        self.writer = _SummaryWriter(self.logdir)
+        self.pbar: _tqdm = _tqdm_auto(bar_format="", leave=False, position=0)
+
         self.hparams = hparams
         self.epoch = start_epoch
         self.model = self.configure_model().to(self.device)
@@ -191,6 +194,19 @@ class Trainer(_abc.ABC, _Generic[_HParamType]):
             save_data.sched_state,
         )
         del save_data
+
+    @classmethod
+    def load_checkpoint(cls, checkpoint_path: str) -> tuple[_nn.Module, _HParamType]:
+        save_data: _CheckpointSaveData = _torch.load(checkpoint_path)
+        trainer = cls("TMP")
+        trainer.hparams = save_data.hparams
+        trainer.model = trainer.configure_model()
+        trainer.model.load_state_dict(save_data.model_state)
+        model = trainer.model
+        hparams = trainer.hparams
+        del save_data
+        del trainer
+        return model, hparams
 
     def train(self) -> None:
         self._display_model_stats()
