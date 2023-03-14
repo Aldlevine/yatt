@@ -48,7 +48,7 @@ _ModelType = _TypeVar("_ModelType", bound=_nn.Module)
 @_dataclass
 class _CheckpointSaveData(_Generic[_HParamType]):
     # user inputs
-    hparams: _HParamType
+    hparams: dict[str, _Any]
 
     # training info
     epoch: int
@@ -104,24 +104,22 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
 
         self.logdir = _time.strftime(f"runs/{self.exp_name}/%Y-%m-%d@%T")
         self.ckptdir = _os.path.join(self.logdir, "checkpoints")
-        # self.writer = _SummaryWriter(self.logdir)
-        # self.pbar: _tqdm = _tqdm_auto(bar_format="", leave=False, position=0)
         self.reserved_lines = 0
 
+    @classmethod
     @_abc.abstractmethod
-    def configure_model(self) -> _ModelType:
-        raise NotImplementedError(self.configure_model.__name__)
+    def configure_model(cls, hp: _HParamType) -> _ModelType:
+        raise NotImplementedError(cls.configure_model.__name__)
 
-    # @_abc.abstractmethod
-    # def configure_optimizer(self) -> _torch.optim.Optimizer:
-    #     raise NotImplementedError(self.configure_optimizer.__name__)
+    @classmethod
     @_abc.abstractmethod
-    def configure_optimizer(self) -> OptimizerConfig:
-        raise NotImplementedError(self.configure_optimizer.__name__)
+    def configure_optimizer(cls, hp: _HParamType, model: _ModelType) -> OptimizerConfig:
+        raise NotImplementedError(cls.configure_optimizer.__name__)
 
+    @classmethod
     @_abc.abstractmethod
-    def configure_data_loaders(self) -> DataLoaderConfig:
-        raise NotImplementedError(self.configure_data_loaders.__name__)
+    def configure_data_loaders(cls, hp: _HParamType) -> DataLoaderConfig:
+        raise NotImplementedError(cls.configure_data_loaders.__name__)
 
     @_abc.abstractmethod
     def train_step(self, batch: list[_Tensor], batch_idx: int) -> _Tensor:
@@ -162,10 +160,10 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
 
         self.hparams = hparams
         self.epoch = start_epoch
-        self.model = self.configure_model().to(self.device)
+        self.model = self.configure_model(hparams).to(self.device)
         if model_state:
             self.model.load_state_dict(model_state)
-        self.optimizer, self.lr_scheduler = self.configure_optimizer()
+        self.optimizer, self.lr_scheduler = self.configure_optimizer(hparams, self.model)
         if optim_state:
             self.optimizer.load_state_dict(optim_state)  # type: ignore
         if sched_state != None and self.lr_scheduler != None:
@@ -185,10 +183,20 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
         with open(f"{self.logdir}/hparams.yaml", "w") as file:
             _yaml.dump(self.hparams._asdict(), file)
 
+    @classmethod
+    def serialize_hparams(cls, hparams: _HParamType) -> dict[str, _Any]:
+        return hparams._asdict()
+    
+    @classmethod
+    def deserialize_hparams(cls, hparams: dict[str, _Any]) -> _HParamType:
+        deserialized_type = HParams("HParams", **{k: type(v) for k,v in hparams.items()})
+        deserialized = deserialized_type(*hparams.values())
+        return deserialized # type: ignore
+
     def configure_checkpoint(self, checkpoint_path: str) -> None:
         save_data: _CheckpointSaveData = _torch.load(checkpoint_path)
         self.configure(
-            save_data.hparams,
+            self.deserialize_hparams(save_data.hparams),
             save_data.epoch + 1,
             save_data.model_state,
             save_data.optim_state,
@@ -199,14 +207,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
     @classmethod
     def load_checkpoint(cls, checkpoint_path: str) -> tuple[_ModelType, _HParamType]:
         save_data: _CheckpointSaveData = _torch.load(checkpoint_path)
-        trainer = cls("TMP")
-        trainer.hparams = save_data.hparams
-        trainer.model = trainer.configure_model()
-        trainer.model.load_state_dict(save_data.model_state)
-        model = trainer.model
-        hparams = trainer.hparams
-        del save_data
-        del trainer
+        hparams = cls.deserialize_hparams(save_data.hparams)
+        model = cls.configure_model(hparams)
         return model, hparams
 
     def train(self) -> None:
@@ -218,7 +220,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             position=0,
             leave=False,
         )
-        self.data_loaders = self.configure_data_loaders()
+        self.data_loaders = self.configure_data_loaders(self.hparams)
         self._display_model_stats()
         for epoch in range(self.epoch, self.max_epochs):
             self.epoch = epoch
@@ -360,7 +362,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             model_state=self.model.state_dict(),
             optim_state=self.optimizer.state_dict(),
             sched_state=self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None,
-            hparams=self.hparams,
+            hparams=self.hparams._asdict(),
             epoch=self.epoch,
             loss=loss,
         )
