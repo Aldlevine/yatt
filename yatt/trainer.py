@@ -257,13 +257,13 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
         self.pbar.write(msg)
 
     def log_scalar(self, tag: str, value: _Tensor, step: int) -> None:
-        self.writer.add_scalar(tag, value.cpu(), step, new_style=True)
+        self.writer.add_scalar(tag, value.detach().cpu(), step, new_style=True)
         self.pbar.set_postfix({
             tag: value.item(),
         })
 
     def log_image(self, tag: str, image: _Tensor, step: int) -> None:
-        self.writer.add_image(tag, image, step)
+        self.writer.add_image(tag, image.detach().cpu(), step)
 
     def log_graph(self, input: _Tensor) -> None:
         self.writer.add_graph(self.model, input)
@@ -462,14 +462,14 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             leave=_IS_NOTEBOOK,
         )
         num_batches: int = len(self.pbar)
-        epoch_loss: _Tensor = _torch.zeros(1)
-        total_loss: _Tensor = _torch.zeros(1)
+        epoch_loss: _Tensor = _torch.zeros(1).detach()
+        total_loss: _Tensor = _torch.zeros(1).detach()
         total_loss_count: int = 0
         for batch_idx, batch in enumerate(self.pbar):
             batch = [t.to(self.device) for t in batch]
             loss = get_loss(batch, batch_idx)
-            epoch_loss += loss.cpu()
-            total_loss += loss.cpu()
+            epoch_loss += loss.detach().cpu()
+            total_loss += loss.detach().cpu()
             total_loss_count += 1
 
             if not log_epoch_only and ((total_loss_count >= self.log_interval)
