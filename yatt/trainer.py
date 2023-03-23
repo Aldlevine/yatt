@@ -495,6 +495,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             with _autocast(self.amp_enabled):
                 loss = self.train_step(batch, batch_idx)
 
+            unscaled_loss = loss.detach()
+
             if self.grad_scaler:
                 loss: _Tensor = self.grad_scaler.scale(loss) # type: ignore
 
@@ -514,7 +516,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             else:
                 self.optimizer.step()
 
-            return loss
+            return unscaled_loss
 
         self.train_epoch_begin()
         self._loop("train", get_loss, log_epoch_only=False)
