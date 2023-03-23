@@ -501,6 +501,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             loss.backward()
 
             if self.clip_grad > 0:
+                if self.grad_scaler:
+                    self.grad_scaler.unscale_(self.optimizer)
                 _nn.utils.clip_grad.clip_grad_norm_(
                     self.model.parameters(),
                     max_norm=self.clip_grad,
