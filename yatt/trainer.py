@@ -17,6 +17,8 @@ from IPython.display import clear_output as _clear_output
 from torch import Tensor as _Tensor
 from torch import nn as _nn
 from torch.utils import data as _data
+from torch.cuda.amp.grad_scaler import GradScaler as _GradScaler
+from torch.cuda.amp.autocast_mode import autocast as _autocast
 from tqdm import tqdm as _tqdm
 from tqdm.auto import tqdm as _tqdm_auto
 from tqdm.notebook import tqdm_notebook as _tqdm_notebook
@@ -58,6 +60,7 @@ class _CheckpointSaveData(_Generic[_HParamType]):
     model_state: dict[_Any, _Any]
     optim_state: dict[_Any, _Any]
     sched_state: _Optional[dict[_Any, _Any]]
+    grad_state: _Optional[dict[_Any, _Any]]
 
 
 @_dataclass
@@ -94,6 +97,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
         max_epochs: int = 500,
         log_interval: int = 50,
         save_best_count: int = 1,
+        clip_grad: float = 0.0,
+        amp_enabled: bool = False,
     ) -> None:
         super().__init__()
         self.exp_name = exp_name
@@ -101,6 +106,8 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
         self.max_epochs = max_epochs
         self.log_interval = log_interval
         self.save_best_count = save_best_count
+        self.clip_grad = clip_grad
+        self.amp_enabled = amp_enabled
 
         self.logdir = _time.strftime(f"runs/{self.exp_name}/%Y-%m-%d@%T")
         self.ckptdir = _os.path.join(self.logdir, "checkpoints")
@@ -115,6 +122,11 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
     @_abc.abstractmethod
     def configure_optimizer(cls, hp: _HParamType, model: _ModelType) -> OptimizerConfig:
         raise NotImplementedError(cls.configure_optimizer.__name__)
+
+    @classmethod
+    @_abc.abstractmethod
+    def configure_grad_scaler(cls, hp: _HParamType, model: _ModelType) -> _Optional[_GradScaler]:
+        return None
 
     @classmethod
     @_abc.abstractmethod
@@ -154,20 +166,28 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
                   start_epoch: int = 0,
                   model_state: dict[_Any, _Any] | None = None,
                   optim_state: dict[_Any, _Any] | None = None,
-                  sched_state: dict[_Any, _Any] | None = None) -> None:
+                  sched_state: dict[_Any, _Any] | None = None,
+                  grad_state: dict[_Any, _Any] | None = None) -> None:
         self.writer = _SummaryWriter(self.logdir)
         self.pbar: _tqdm = _tqdm_auto(bar_format="", leave=False, position=0)
 
         self.hparams = hparams
         self.epoch = start_epoch
+
         self.model = self.configure_model(hparams).to(self.device)
         if model_state:
             self.model.load_state_dict(model_state)
+
         self.optimizer, self.lr_scheduler = self.configure_optimizer(hparams, self.model)
         if optim_state:
             self.optimizer.load_state_dict(optim_state)  # type: ignore
         if sched_state != None and self.lr_scheduler != None:
             self.lr_scheduler.load_state_dict(sched_state)
+
+        self.grad_scaler = self.configure_grad_scaler(hparams, self.model)
+        if grad_state != None and self.grad_scaler != None:
+            self.grad_scaler.load_state_dict(grad_state)
+
         hparams_log = {}
         for k, v in self.hparams._asdict().items():
             if not isinstance(v, (float, str, bool, _Tensor)):
@@ -201,6 +221,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             save_data.model_state,
             save_data.optim_state,
             save_data.sched_state,
+            save_data.grad_state,
         )
         del save_data
 
@@ -362,6 +383,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
             model_state=self.model.state_dict(),
             optim_state=self.optimizer.state_dict(),
             sched_state=self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None,
+            grad_state=self.grad_scaler.state_dict() if self.grad_scaler is not None else None,
             hparams=self.hparams._asdict(),
             epoch=self.epoch,
             loss=loss,
@@ -468,10 +490,28 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
         self.model.train()
 
         def get_loss(batch: list[_Tensor], batch_idx: int) -> _Tensor:
+            self.optimizer.zero_grad()
             self.model.zero_grad()
-            loss = self.train_step(batch, batch_idx)
+            with _autocast(self.amp_enabled):
+                loss = self.train_step(batch, batch_idx)
+
+            if self.grad_scaler:
+                loss: _Tensor = self.grad_scaler.scale(loss) # type: ignore
+
             loss.backward()
-            self.optimizer.step()
+
+            if self.clip_grad > 0:
+                _nn.utils.clip_grad.clip_grad_norm_(
+                    self.model.parameters(),
+                    max_norm=self.clip_grad,
+                    )
+            
+            if self.grad_scaler:
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+            else:
+                self.optimizer.step()
+
             return loss
 
         self.train_epoch_begin()
