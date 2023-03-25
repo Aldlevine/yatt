@@ -230,6 +230,7 @@ class Trainer(_abc.ABC, _Generic[_HParamType, _ModelType]):
         save_data: _CheckpointSaveData = _torch.load(checkpoint_path)
         hparams = cls.deserialize_hparams(save_data.hparams)
         model = cls.configure_model(hparams)
+        model.load_state_dict(save_data.model_state)
         return model, hparams
 
     def train(self) -> None:
